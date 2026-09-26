@@ -1,5 +1,5 @@
 # Real-Time Stock Market Intelligence Platform
-# Built by Shreyashree Mondal
+### Built by Shreyashree Mondal
 
 A complete data platform for live stock data: streaming ingestion, stream processing,
 machine learning, A/B testing, NLP, GenAI, a daily batch layer, data quality, and CI/CD.
