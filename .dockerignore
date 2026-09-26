@@ -1,0 +1,6 @@
+.env
+.git
+.venv
+data
+mlruns
+__pycache__

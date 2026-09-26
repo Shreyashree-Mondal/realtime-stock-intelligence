@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tape — live market analytics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  :root {
+    --paper: #e9eef2;
+    --panel: #f7f9fb;
+    --ink: #17222e;
+    --muted: #5d6b79;
+    --rule: #cdd6de;
+    --up: #13805a;
+    --down: #bf3b33;
+    --steel: #2c5d8f;
+    --amber: #b7791f;
+    --display: "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+    --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #121a23; --panel: #19232e; --ink: #e3e9ef; --muted: #8d9aa7;
+      --rule: #2a3643; --up: #2fb37f; --down: #e0645b; --steel: #6f9fd0; --amber: #e0a449;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body); }
+  body { font-variant-numeric: tabular-nums; }
+  button:focus-visible, select:focus-visible { outline: 2px solid var(--steel); outline-offset: 2px; }
+
+  /* The ticker tape is the one loud element on the page */
+  .tape {
+    display: flex; gap: 0; overflow-x: auto; background: var(--ink); color: var(--paper);
+    font-family: var(--display); scrollbar-width: none;
+  }
+  .tape::-webkit-scrollbar { display: none; }
+  .tick {
+    flex: 0 0 auto; padding: 14px 22px 12px; border: 0; border-right: 1px solid rgba(255,255,255,.12);
+    background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+  }
+  .tick[aria-pressed="true"] { background: var(--steel); }
+  .tick .sym { display: block; font-size: 15px; font-weight: 600; letter-spacing: .02em; opacity: .85; }
+  .tick .px { display: block; font-size: 28px; font-weight: 700; line-height: 1.05; }
+  .tick .chg { font-size: 15px; font-weight: 600; }
+  .tick .chg.up { color: #5fd3a2; } .tick .chg.down { color: #ff8f86; }
+  .tape .empty { padding: 18px 22px; font-family: var(--body); font-size: 14px; }
+
+  main {
+    display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px;
+    padding: 20px; max-width: 1400px; margin: 0 auto;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+
+  .chart-panel { background: var(--panel); border: 1px solid var(--rule); padding: 18px 18px 8px; }
+  .chart-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 18px; margin-bottom: 10px; }
+  .chart-head h1 { font-family: var(--display); font-size: 34px; font-weight: 700; margin: 0; }
+  .stats { display: flex; flex-wrap: wrap; gap: 18px; font-size: 14px; color: var(--muted); }
+  .stats b { color: var(--ink); font-weight: 600; }
+  .legend { display: flex; gap: 16px; font-size: 13px; color: var(--muted); margin-left: auto; }
+  .legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; margin-right: 6px; }
+  #chart { height: 460px; }
+  .range { display: flex; gap: 4px; }
+  .range button {
+    border: 1px solid var(--rule); background: transparent; color: var(--muted);
+    font: 500 13px var(--body); padding: 4px 10px; cursor: pointer;
+  }
+  .range button[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+  aside { display: flex; flex-direction: column; gap: 20px; }
+  section.side { background: var(--panel); border: 1px solid var(--rule); padding: 14px 16px; }
+  section.side h2 { font-family: var(--display); font-size: 20px; font-weight: 600; margin: 0 0 2px; }
+  section.side p.hint { font-size: 12.5px; color: var(--muted); margin: 0 0 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  td { padding: 6px 0; border-top: 1px solid var(--rule); }
+  td.num { text-align: right; }
+  .up { color: var(--up); } .down { color: var(--down); }
+  .bar { height: 6px; background: var(--rule); margin-top: 4px; }
+  .bar span { display: block; height: 100%; background: var(--amber); }
+  ul.alerts { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+  ul.alerts li { padding: 7px 0; border-top: 1px solid var(--rule); display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; }
+  ul.alerts small { color: var(--muted); grid-column: 1 / -1; }
+  .quiet { color: var(--muted); font-size: 13.5px; padding: 6px 0; }
+  .lower { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;
+           padding: 0 20px 20px; max-width: 1400px; margin: 0 auto; }
+  .ask { grid-column: 1 / -1; }
+  .ask form { display: flex; gap: 8px; }
+  .ask input { flex: 1; font: 15px var(--body); padding: 9px 12px; border: 1px solid var(--rule);
+               background: var(--paper); color: var(--ink); }
+  .ask button { font: 600 14px var(--body); padding: 9px 16px; border: 0; background: var(--steel); color: #fff; cursor: pointer; }
+  .ask pre { background: var(--paper); padding: 10px; overflow-x: auto; font-size: 12.5px; margin: 10px 0 0; }
+  .decision { font-size: 14px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--rule); }
+  th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12.5px; padding-bottom: 4px; }
+  th.num { text-align: right; }
+  footer { max-width: 1400px; margin: 0 auto; padding: 0 20px 24px; font-size: 12.5px; color: var(--muted); }
+</style>
+</head>
+<body>
+  <nav class="tape" id="tape" aria-label="Symbols"><div class="empty">Waiting for the first 1-minute bars. Start the producer and the Spark job.</div></nav>
+
+  <main>
+    <div class="chart-panel">
+      <div class="chart-head">
+        <h1 id="title">—</h1>
+        <div class="stats" id="stats"></div>
+        <div class="range" id="range" aria-label="Time range">
+          <button data-min="30">30m</button>
+          <button data-min="60" aria-pressed="true">1h</button>
+          <button data-min="240">4h</button>
+        </div>
+      </div>
+      <div class="legend">
+        <span><i style="background:var(--steel)"></i>SMA 5</span>
+        <span><i style="background:var(--amber)"></i>SMA 20</span>
+      </div>
+      <div id="chart"></div>
+    </div>
+
+    <aside>
+      <section class="side">
+        <h2>Movers</h2>
+        <p class="hint">Change over the last 15 minutes</p>
+        <table><tbody id="movers"></tbody></table>
+      </section>
+      <section class="side">
+        <h2>Volatility</h2>
+        <p class="hint">Price std-dev in the latest 5-minute sliding window</p>
+        <div id="vol"></div>
+      </section>
+      <section class="side">
+        <h2>Unusual moves</h2>
+        <p class="hint">1-minute returns more than 3σ from the previous 20 bars</p>
+        <ul class="alerts" id="alerts"></ul>
+      </section>
+    </aside>
+  </main>
+  <div class="lower">
+    <section class="side">
+      <h2>Model A/B test</h2>
+      <p class="hint">Next-5-minute volatility forecast. Each bar is randomly served by one model; error is measured once the actual is known.</p>
+      <table><thead><tr><th>Model</th><th class="num">Bars</th><th class="num">Error (MAE)</th><th class="num">vs baseline</th></tr></thead>
+        <tbody id="ab"></tbody></table>
+      <div class="decision" id="ab-decision"></div>
+    </section>
+    <section class="side">
+      <h2>ML anomalies</h2>
+      <p class="hint">Bars flagged by the Isolation Forest model</p>
+      <ul class="alerts" id="ml-anoms"></ul>
+    </section>
+    <section class="side">
+      <h2>News sentiment</h2>
+      <p class="hint">FinBERT score from −1 (negative) to +1 (positive), last 24 hours</p>
+      <ul class="alerts" id="news"></ul>
+    </section>
+    <section class="side">
+      <h2>Daily risk, US and India</h2>
+      <p class="hint">2-year history, refreshed by the daily batch job</p>
+      <div style="overflow-x:auto"><table><thead><tr><th>Stock</th><th class="num">Sharpe</th><th class="num">VaR 95%</th><th class="num">Max DD</th><th class="num">Beta</th></tr></thead>
+        <tbody id="risk"></tbody></table></div>
+    </section>
+    <section class="side ask">
+      <h2>Ask the market</h2>
+      <p class="hint">Ask about live data, news, reports or how the project works. Try "Is TSLA volatile right now and is there news about it?"</p>
+      <form id="ask-form"><input id="ask-q" aria-label="Question" placeholder="Type a question" maxlength="300"><button type="submit">Ask</button></form>
+      <div id="ask-out"></div>
+    </section>
+  </div>
+  <footer id="status">Updates every 5 seconds.</footer>
+
+<script>
+const REFRESH_MS = 5000;
+let symbol = null, minutes = 60;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const toSec = iso => Math.floor(Date.parse(iso + "Z") / 1000);   // API returns naive UTC
+const fmt = (v, d = 2) => v == null ? "—" : Number(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+const cls = v => v >= 0 ? "up" : "down";
+const sign = v => (v >= 0 ? "+" : "") + fmt(v) + "%";
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+async function get(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error(`${path}: ${r.status}`);
+  return r.json();
+}
+
+// ---------------------------------------------------------------- chart
+const chart = LightweightCharts.createChart(document.getElementById("chart"), {
+  autoSize: true,
+  layout: { background: { color: "transparent" }, textColor: css("--muted"), fontFamily: "IBM Plex Sans" },
+  grid: { vertLines: { color: css("--rule") }, horzLines: { color: css("--rule") } },
+  rightPriceScale: { borderColor: css("--rule") },
+  timeScale: { borderColor: css("--rule"), timeVisible: true, secondsVisible: false },
+});
+const candles = chart.addCandlestickSeries({
+  upColor: css("--up"), downColor: css("--down"), borderVisible: false,
+  wickUpColor: css("--up"), wickDownColor: css("--down"),
+});
+const sma5 = chart.addLineSeries({ color: css("--steel"), lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+const sma20 = chart.addLineSeries({ color: css("--amber"), lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+const vol = chart.addHistogramSeries({ priceScaleId: "", priceFormat: { type: "volume" }, color: css("--rule") });
+chart.priceScale("").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+
+async function loadChart(fit = false) {
+  if (!symbol) return;
+  const rows = await get(`/api/candles/${encodeURIComponent(symbol)}?minutes=${minutes}`);
+  candles.setData(rows.map(r => ({ time: toSec(r.window_start), open: r.open, high: r.high, low: r.low, close: r.close })));
+  sma5.setData(rows.filter(r => r.sma_5 != null).map(r => ({ time: toSec(r.window_start), value: r.sma_5 })));
+  sma20.setData(rows.filter(r => r.sma_20 != null).map(r => ({ time: toSec(r.window_start), value: r.sma_20 })));
+  vol.setData(rows.map(r => ({ time: toSec(r.window_start), value: r.volume })));
+  if (fit) chart.timeScale().fitContent();
+
+  const last = rows[rows.length - 1];
+  document.getElementById("title").textContent = symbol;
+  document.getElementById("stats").innerHTML = last ? `
+    <span>Last <b>${fmt(last.close)}</b></span>
+    <span>VWAP <b>${fmt(last.vwap)}</b></span>
+    <span>1m <b class="${cls(last.ret_1m || 0)}">${last.ret_1m == null ? "—" : sign(last.ret_1m * 100)}</b></span>
+    <span>Trades/min <b>${fmt(last.trade_count, 0)}</b></span>` : `<span>No bars in this range yet.</span>`;
+}
+
+// ---------------------------------------------------------------- side panels
+function renderTape(movers) {
+  const tape = document.getElementById("tape");
+  if (!movers.length) return;
+  if (!symbol) symbol = movers[0].symbol;
+  const bySym = [...movers].sort((a, b) => a.symbol.localeCompare(b.symbol));
+  tape.innerHTML = bySym.map(m => `
+    <button class="tick" data-sym="${esc(m.symbol)}" aria-pressed="${m.symbol === symbol}">
+      <span class="sym">${esc(m.symbol)}</span>
+      <span class="px">${fmt(m.last_close)}</span>
+      <span class="chg ${cls(m.pct_change)}">${sign(m.pct_change)}</span>
+    </button>`).join("");
+}
+
+function renderMovers(movers) {
+  document.getElementById("movers").innerHTML = movers.length ? movers.map(m => `
+    <tr><td>${m.gain_rank}. ${esc(m.symbol)}</td>
+        <td class="num">${fmt(m.last_close)}</td>
+        <td class="num ${cls(m.pct_change)}">${sign(m.pct_change)}</td></tr>`).join("")
+    : `<tr><td class="quiet">No trades in the last 15 minutes.</td></tr>`;
+}
+
+function renderVol(rows) {
+  const max = Math.max(...rows.map(r => r.volatility_pct || 0), 1e-9);
+  document.getElementById("vol").innerHTML = rows.length ? rows.map(r => `
+    <div style="margin-bottom:10px;font-size:14px">
+      <div style="display:flex;justify-content:space-between"><span>${esc(r.symbol)}</span><span>${fmt(r.volatility_pct, 3)}%</span></div>
+      <div class="bar"><span style="width:${(100 * (r.volatility_pct || 0) / max).toFixed(1)}%"></span></div>
+    </div>`).join("") : `<div class="quiet">Needs a few minutes of data.</div>`;
+}
+
+function renderAlerts(rows) {
+  document.getElementById("alerts").innerHTML = rows.length ? rows.map(a => `
+    <li><span>${esc(a.symbol)} <span class="${cls(a.pct_move)}">${sign(a.pct_move)}</span></span>
+        <span>z ${fmt(a.z_score, 1)}</span>
+        <small>${new Date(toSec(a.window_start) * 1000).toLocaleTimeString()} · close ${fmt(a.close)}</small></li>`).join("")
+    : `<li class="quiet">No unusual moves in the last hour.</li>`;
+}
+
+// ---------------------------------------------------------------- loop
+async function refresh(fit = false) {
+  const status = document.getElementById("status");
+  try {
+    const [movers, volRows, alerts] = await Promise.all([get("/api/movers?minutes=15"), get("/api/volatility"), get("/api/alerts?z=3")]);
+    const firstLoad = !symbol && movers.length;
+    renderTape(movers); renderMovers(movers); renderVol(volRows); renderAlerts(alerts);
+    await loadChart(fit || firstLoad);
+    status.textContent = `Updated ${new Date().toLocaleTimeString()}. Refreshes every 5 seconds.`;
+  } catch (e) {
+    status.textContent = `Can't reach the API (${e.message}). Check that uvicorn and Postgres are running.`;
+  }
+}
+
+document.getElementById("tape").addEventListener("click", e => {
+  const b = e.target.closest(".tick"); if (!b) return;
+  symbol = b.dataset.sym;
+  document.querySelectorAll(".tick").forEach(t => t.setAttribute("aria-pressed", t === b));
+  loadChart(true);
+});
+document.getElementById("range").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  minutes = +b.dataset.min;
+  document.querySelectorAll("#range button").forEach(x => x.setAttribute("aria-pressed", x === b));
+  loadChart(true);
+});
+
+refresh(true);
+setInterval(refresh, REFRESH_MS);
+
+// ---------------------------------------------------------------- lower panels
+const pct = (v, d = 2) => v == null ? "—" : fmt(v * 100, d) + "%";
+async function refreshLower() {
+  const [ab, anoms, news, risk] = await Promise.all([
+    get("/api/model/ab"), get("/api/anomalies"), get("/api/sentiment"), get("/api/risk")].map(p => p.catch(() => null)));
+  if (ab) {
+    const name = { A: "A · Ridge", B: "B · XGBoost" };
+    document.getElementById("ab").innerHTML = ab.live.length ? ab.live.map(r => `
+      <tr><td>${name[r.variant] || r.variant}</td><td class="num">${fmt(r.n, 0)}</td>
+          <td class="num">${fmt(r.mae * 1e4, 3)} bp</td>
+          <td class="num ${r.mae <= r.baseline_mae ? "up" : "down"}">${sign((r.mae / r.baseline_mae - 1) * 100)}</td></tr>`).join("")
+      : `<tr><td class="quiet" colspan="4">Waiting for trained models and outcomes.</td></tr>`;
+    const t = ab.last_test;
+    document.getElementById("ab-decision").textContent = t
+      ? `Last test: p = ${fmt(t.p_value, 3)}. ${t.decision}.` : "Run make abtest for the formal significance test.";
+  }
+  if (anoms) document.getElementById("ml-anoms").innerHTML = anoms.length ? anoms.map(a => `
+      <li><span>${esc(a.symbol)} <span class="${cls(a.ret_pct)}">${sign(a.ret_pct)}</span></span>
+          <span>vol ×${fmt(a.volume_ratio, 1)}</span>
+          <small>${new Date(toSec(a.window_start) * 1000).toLocaleTimeString()}</small></li>`).join("")
+    : `<li class="quiet">No anomalies in the last hour.</li>`;
+  if (news) document.getElementById("news").innerHTML = news.latest.length ? news.latest.slice(0, 8).map(n => `
+      <li><span>${esc(n.symbol)}</span><span class="${cls(n.score)}">${n.score >= 0 ? "+" : ""}${fmt(n.score, 2)}</span>
+          <small>${esc(n.headline)}</small></li>`).join("")
+    : `<li class="quiet">Start the NLP services to see headlines.</li>`;
+  if (risk) document.getElementById("risk").innerHTML = risk.length ? risk.map(r => `
+      <tr><td>${esc(r.symbol)}</td><td class="num">${fmt(r.sharpe)}</td><td class="num">${pct(r.var_95_1d)}</td>
+          <td class="num down">${pct(r.max_drawdown, 1)}</td><td class="num">${fmt(r.beta)}</td></tr>`).join("")
+    : `<tr><td class="quiet" colspan="5">Run make daily to fill this table.</td></tr>`;
+}
+refreshLower();
+setInterval(refreshLower, 15000);
+
+document.getElementById("ask-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const q = document.getElementById("ask-q").value.trim(), out = document.getElementById("ask-out");
+  if (!q) return;
+  out.innerHTML = `<p class="quiet">Thinking…</p>`;
+  try {
+    const r = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question: q }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.status);
+    const used = (d.tools || []).map(t => t === "sql" ? "live data" : "knowledge base").join(" + ");
+    const srcs = (d.sources || []).map(s => `<li><span>[${s.n}] ${esc(s.title)}</span><span>${esc(s.type)}</span></li>`).join("");
+    out.innerHTML = `<p>${esc(d.answer)}</p><p class="quiet">Used: ${esc(used)}</p>
+      ${srcs ? `<details><summary class="quiet">Sources</summary><ul class="alerts">${srcs}</ul></details>` : ""}
+      ${d.sql ? `<details><summary class="quiet">Show SQL</summary><pre>${esc(d.sql)}</pre></details>` : ""}`;
+  } catch (err) { out.innerHTML = `<p class="quiet">Couldn't answer: ${esc(err.message)}</p>`; }
+});
+
+</script>
+</body>
+</html>
